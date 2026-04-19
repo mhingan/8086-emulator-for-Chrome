@@ -1,0 +1,866 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>emu8086 - Intel 8086 Assembler and Microprocessor Emulator</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+
+body {
+  font-family: "Courier New", Courier, monospace;
+  font-size: 11px;
+  background: #008080;
+  min-height: 100vh;
+  overflow: hidden;
+  cursor: default;
+  user-select: none;
+}
+
+/* ===== WIN98 3D BORDERS ===== */
+.raised  { border:2px solid; border-color:#ffffff #808080 #808080 #ffffff; }
+.sunken  { border:2px solid; border-color:#808080 #ffffff #ffffff #808080; }
+.groove  { border:2px solid; border-color:#808080 #dfdfdf #dfdfdf #808080; }
+
+/* ===== MAIN APP WINDOW ===== */
+#app-window {
+  position:fixed; inset:4px;
+  background:#c0c0c0;
+  display:flex; flex-direction:column;
+  border:2px solid; border-color:#dfdfdf #000 #000 #dfdfdf;
+  outline:2px solid #808080;
+}
+
+/* ===== TITLE BAR ===== */
+.app-titlebar {
+  height:20px;
+  background:linear-gradient(90deg,#000080 0%,#1084d0 100%);
+  display:flex; align-items:center;
+  padding:0 3px; gap:4px;
+  color:#fff; font-size:11px; font-weight:bold;
+  flex-shrink:0;
+}
+.app-titlebar .ticon {
+  width:16px;height:16px;
+  background:#c0c0c0;
+  display:flex;align-items:center;justify-content:center;
+  font-size:9px;color:#000080;font-weight:bold;
+  border:1px solid #808080;flex-shrink:0;
+}
+.app-titlebar .ttitle { flex:1; }
+.wbtn {
+  width:16px;height:14px;
+  background:#c0c0c0;
+  border:1px solid; border-color:#fff #808080 #808080 #fff;
+  display:flex;align-items:center;justify-content:center;
+  font-size:9px;cursor:pointer;color:#000;line-height:1;
+}
+.wbtn:active { border-color:#808080 #fff #fff #808080; }
+
+/* ===== MENU BAR ===== */
+.menubar {
+  height:20px; background:#c0c0c0;
+  display:flex; align-items:center; padding:0 2px;
+  border-bottom:1px solid #808080; flex-shrink:0;
+}
+.mi {
+  padding:2px 8px; font-size:11px; cursor:pointer; color:#000;
+  height:100%; display:flex; align-items:center;
+}
+.mi:hover { background:#000080; color:#fff; }
+.mi span { text-decoration:underline; }
+
+/* ===== TOOLBAR ===== */
+.toolbar {
+  height:28px; background:#c0c0c0;
+  display:flex; align-items:center; padding:2px 4px; gap:2px;
+  border-bottom:2px solid; border-color:#808080 #fff #fff #808080;
+  flex-shrink:0;
+}
+.tbtn {
+  height:22px; min-width:22px; padding:0 8px;
+  background:#c0c0c0;
+  border:2px solid; border-color:#fff #808080 #808080 #fff;
+  font-size:11px; font-family:"Courier New",monospace;
+  cursor:pointer; display:flex; align-items:center; gap:4px;
+  white-space:nowrap; color:#000;
+}
+.tbtn:hover { background:#d4d0c8; }
+.tbtn:active { border-color:#808080 #fff #fff #808080; padding-left:9px; padding-top:1px; }
+.tb-sep { width:1px;height:18px;background:#808080;margin:0 2px;border-right:1px solid #fff; }
+.tb-info {
+  font-family:"Courier New",monospace; font-size:11px;
+  padding:2px 6px; color:#000080; font-weight:bold;
+  border:2px solid; border-color:#808080 #fff #fff #808080;
+  background:#fff; min-width:50px; text-align:center;
+}
+
+/* ===== CLIENT MDI AREA ===== */
+#mdi {
+  flex:1; background:#808080; padding:3px;
+  display:flex; gap:3px; overflow:hidden; min-height:0;
+}
+
+/* ===== MDI CHILD ===== */
+.mdi {
+  background:#c0c0c0;
+  border:2px solid; border-color:#dfdfdf #000 #000 #dfdfdf;
+  display:flex; flex-direction:column; overflow:hidden;
+}
+.mdi-tb {
+  height:17px;
+  background:linear-gradient(90deg,#000080 0%,#1084d0 100%);
+  display:flex; align-items:center; padding:0 3px; gap:3px;
+  color:#fff; font-size:10px; font-weight:bold; flex-shrink:0;
+}
+.mdi-tb .ticon { width:13px;height:13px;background:#c0c0c0;display:flex;align-items:center;justify-content:center;font-size:8px;color:#000080;border:1px solid #808080;flex-shrink:0; }
+.mdi-tb .ttitle { flex:1; font-size:10px; }
+.mdi-wbtn { width:13px;height:11px;background:#c0c0c0;border:1px solid;border-color:#fff #808080 #808080 #fff;display:flex;align-items:center;justify-content:center;font-size:8px;cursor:pointer;color:#000; }
+
+/* ===== COLUMNS ===== */
+#col-left { display:flex;flex-direction:column;flex:1;gap:3px;min-width:0; }
+#col-right { width:235px;flex-shrink:0;display:flex;flex-direction:column;gap:3px; }
+
+/* ===== CODE EDITOR ===== */
+#win-editor { flex:1;min-height:0; }
+.editor-wrap {
+  display:flex; flex:1; overflow:hidden; margin:2px;
+  border:2px solid; border-color:#808080 #fff #fff #808080;
+  background:#fff;
+}
+#line-nums {
+  background:#ececec; border-right:1px solid #c0c0c0;
+  padding:2px 4px 2px 2px; min-width:30px;
+  font-size:11px; font-family:"Courier New",monospace;
+  color:#808080; line-height:15px; overflow:hidden;
+  text-align:right; flex-shrink:0; user-select:none;
+}
+#line-nums div { height:15px; }
+.editor-inner { position:relative;flex:1;overflow:hidden; }
+#line-hl {
+  position:absolute;left:0;right:0;height:15px;
+  background:#316AC5;
+  pointer-events:none;display:none;z-index:1;
+}
+#code-ed {
+  position:relative;z-index:2;
+  width:100%;height:100%;
+  border:none;outline:none;resize:none;
+  font-family:"Courier New",Courier,monospace;
+  font-size:11px;line-height:15px;
+  padding:2px 4px; background:transparent; color:#000;
+  caret-color:#000;tab-size:8;white-space:pre;overflow:auto;
+  user-select:text;
+}
+#code-ed::selection { background:#316AC5;color:#fff; }
+
+/* ===== EMU OUTPUT ===== */
+#win-out { height:105px;flex-shrink:0; }
+#emu-out {
+  background:#000;color:#c0c0c0;
+  font-family:"Courier New",monospace;font-size:11px;line-height:14px;
+  flex:1;overflow-y:auto;padding:3px 5px;margin:2px;
+  border:2px solid;border-color:#808080 #fff #fff #808080;
+}
+.lok  { color:#c0c0c0; }
+.lstep{ color:#00ff00; }
+.lerr { color:#ff5555; }
+.lwarn{ color:#ffff55; }
+.linfo{ color:#55ffff; }
+
+/* ===== REGISTERS ===== */
+#win-reg { flex-shrink:0; }
+.reg-scroll { overflow-y:auto;flex:1;max-height:260px; }
+.reg-scroll::-webkit-scrollbar{width:16px;}
+.reg-scroll::-webkit-scrollbar-track{background:#c0c0c0;}
+.reg-scroll::-webkit-scrollbar-thumb{background:#c0c0c0;border:2px solid;border-color:#fff #808080 #808080 #fff;}
+.reg-hdr {
+  background:#000080;color:#fff;
+  font-size:10px;font-weight:bold;
+  padding:1px 4px;letter-spacing:1px;
+}
+.reg-row {
+  display:grid;
+  grid-template-columns:28px 50px 44px 14px 14px;
+  align-items:center; height:15px;
+  border-bottom:1px solid #f0f0f0;
+  padding:0 3px; gap:0;
+}
+.reg-row:hover{background:#e8e8ff;}
+.reg-row.chg{background:#ffffc0;}
+.rn{font-size:10px;font-weight:bold;color:#000080;}
+.rh{font-size:11px;color:#000;text-align:right;padding-right:3px;}
+.rd{font-size:10px;color:#606060;text-align:right;}
+.rah{font-size:9px;color:#800000;text-align:right;}
+.ral{font-size:9px;color:#008000;text-align:right;}
+
+/* Flags */
+.flags-hdr{background:#000080;color:#fff;font-size:10px;font-weight:bold;padding:1px 4px;letter-spacing:1px;}
+.flags-area {
+  display:flex;flex-wrap:wrap;gap:2px;
+  padding:3px;background:#c0c0c0;
+  border-top:1px solid #808080;
+}
+.fl {
+  display:flex;flex-direction:column;align-items:center;
+  width:28px;
+  border:1px solid;border-color:#808080 #fff #fff #808080;
+  background:#dfdfdf;padding:1px;
+}
+.fl-n{font-size:9px;color:#000080;font-weight:bold;line-height:12px;}
+.fl-v{
+  width:16px;height:14px;text-align:center;line-height:14px;
+  font-size:11px;font-weight:bold;color:#000;
+  background:#fff;border:1px solid;border-color:#808080 #fff #fff #808080;
+}
+.fl-v.set{background:#ffff00;border-color:#000080 #c0c0c0 #c0c0c0 #000080;}
+
+/* ===== MEMORY ===== */
+#win-mem{flex:1;min-height:0;}
+.mem-toolbar{
+  height:20px;background:#c0c0c0;
+  display:flex;align-items:center;padding:0 4px;gap:4px;
+  border-bottom:1px solid #808080;flex-shrink:0;
+}
+.mem-lbl{font-size:10px;color:#000;}
+.mem-inp{
+  width:48px;height:15px;
+  font-family:"Courier New",monospace;font-size:10px;
+  border:2px solid;border-color:#808080 #fff #fff #808080;
+  background:#fff;padding:0 2px;outline:none;color:#000;
+  user-select:text;
+}
+.mem-grid{
+  background:#fff;margin:2px;overflow:auto;flex:1;
+  border:2px solid;border-color:#808080 #fff #fff #808080;
+  font-size:10px;font-family:"Courier New",monospace;
+}
+.mem-grid::-webkit-scrollbar{width:16px;height:16px;}
+.mem-grid::-webkit-scrollbar-track{background:#c0c0c0;}
+.mem-grid::-webkit-scrollbar-thumb{background:#c0c0c0;border:2px solid;border-color:#fff #808080 #808080 #fff;}
+.mem-hdr{
+  display:flex;background:#000080;color:#fff;
+  font-size:10px;font-weight:bold;
+  padding:1px 3px;position:sticky;top:0;z-index:2;
+}
+.mha{width:56px;flex-shrink:0;}
+.mhb{display:flex;gap:1px;flex:1;}
+.mhbc{width:20px;text-align:center;flex-shrink:0;}
+.mhasc{width:70px;padding-left:4px;border-left:1px solid #1060a0;}
+.mem-row{
+  display:flex;align-items:center;height:14px;
+  border-bottom:1px solid #f0f0f0;padding:0 3px;
+}
+.mem-row:hover{background:#e8e8ff;}
+.ma{width:56px;color:#000080;font-weight:bold;flex-shrink:0;font-size:10px;}
+.mb{display:flex;gap:1px;flex:1;}
+.mbc{width:20px;text-align:center;flex-shrink:0;font-size:10px;color:#000;}
+.mbc.nz{color:#000080;font-weight:bold;}
+.mbc.chg{background:#ffff00;color:#000;font-weight:bold;}
+.masc{width:70px;color:#008000;padding-left:4px;border-left:1px solid #d0d0d0;font-size:10px;}
+
+/* ===== STATUS BAR ===== */
+#sbar{
+  height:20px;background:#c0c0c0;
+  display:flex;align-items:center;padding:0;
+  border-top:2px solid;border-color:#fff #808080 #808080 #fff;
+  flex-shrink:0;
+}
+.sp{
+  height:100%;display:flex;align-items:center;
+  padding:0 6px;font-size:11px;white-space:nowrap;color:#000;
+  border-right:2px solid;border-color:#808080 #fff #fff #808080;
+}
+.sp:first-child{flex:1;}
+.sp.ok{color:#000080;}
+.sp.err{color:#cc0000;}
+.sp.warn{color:#804000;}
+</style>
+</head>
+<body>
+<div id="app-window">
+
+  <!-- Title Bar -->
+  <div class="app-titlebar">
+    <div class="ticon">8</div>
+    <span class="ttitle">emu8086 - [unnamed.asm]</span>
+    <div class="wbtn">_</div>
+    <div class="wbtn">&#9633;</div>
+    <div class="wbtn" style="font-weight:bold">&#10005;</div>
+  </div>
+
+  <!-- Menu Bar -->
+  <div class="menubar">
+    <div class="mi"><span>F</span>ile</div>
+    <div class="mi"><span>E</span>dit</div>
+    <div class="mi"><span>V</span>iew</div>
+    <div class="mi"><span>A</span>ssembler</div>
+    <div class="mi">E<span>m</span>ulator</div>
+    <div class="mi"><span>H</span>elp</div>
+  </div>
+
+  <!-- Toolbar -->
+  <div class="toolbar">
+    <button class="tbtn" onclick="reloadEmu()" title="Reload / Assemble (F2)">
+      &#128196; Reload
+    </button>
+    <div class="tb-sep"></div>
+    <button class="tbtn" id="btn-step" onclick="stepExec()" title="Single Step (F8)">
+      &#9654; Single Step
+    </button>
+    <button class="tbtn" id="btn-run" onclick="runAll()" title="Run (F5)">
+      &#9193; Run
+    </button>
+    <div class="tb-sep"></div>
+    <button class="tbtn" onclick="reloadEmu()" title="Reset emulator">
+      &#8635; Reset
+    </button>
+    <div class="tb-sep"></div>
+    <span style="font-size:10px;padding:0 3px;">IP</span>
+    <div class="tb-info" id="tb-ip">0000</div>
+    <span style="font-size:10px;padding:0 3px;">Line</span>
+    <div class="tb-info" style="min-width:36px;" id="tb-line">&#8212;</div>
+    <span style="font-size:10px;padding:0 3px;">Steps</span>
+    <div class="tb-info" id="tb-steps">0</div>
+  </div>
+
+  <!-- MDI Client Area -->
+  <div id="mdi">
+
+    <!-- LEFT COLUMN -->
+    <div id="col-left">
+
+      <!-- Code Editor -->
+      <div class="mdi" id="win-editor">
+        <div class="mdi-tb">
+          <div class="ticon" style="color:#000;font-size:7px;">A</div>
+          <span class="ttitle">unnamed.asm</span>
+          <div class="mdi-wbtn">_</div>
+          <div class="mdi-wbtn">&#9633;</div>
+        </div>
+        <div class="editor-wrap">
+          <div id="line-nums"></div>
+          <div class="editor-inner">
+            <div id="line-hl"></div>
+            <textarea id="code-ed" spellcheck="false" autocomplete="off" autocorrect="off"></textarea>
+          </div>
+        </div>
+      </div>
+
+      <!-- Emulator Output -->
+      <div class="mdi" id="win-out">
+        <div class="mdi-tb">
+          <div class="ticon" style="background:#000;color:#0f0;font-size:7px;">&#9654;</div>
+          <span class="ttitle">Emulator - output screen (0000:0000)</span>
+        </div>
+        <div id="emu-out"></div>
+      </div>
+
+    </div><!-- /col-left -->
+
+    <!-- RIGHT COLUMN -->
+    <div id="col-right">
+
+      <!-- Registers -->
+      <div class="mdi" id="win-reg">
+        <div class="mdi-tb">
+          <div class="ticon" style="color:#000080;font-size:7px;">R</div>
+          <span class="ttitle">Registers</span>
+        </div>
+        <div class="reg-scroll">
+          <div class="reg-hdr">General Purpose Registers</div>
+          <div id="rg-gen"></div>
+          <div class="reg-hdr">Index and Pointer Registers</div>
+          <div id="rg-idx"></div>
+          <div class="reg-hdr">Instruction Pointer</div>
+          <div id="rg-ip"></div>
+        </div>
+        <div class="flags-hdr">Flags</div>
+        <div class="flags-area" id="flags-area"></div>
+      </div>
+
+      <!-- Memory -->
+      <div class="mdi" id="win-mem">
+        <div class="mdi-tb">
+          <div class="ticon" style="color:#800000;font-size:7px;">M</div>
+          <span class="ttitle">Memory</span>
+        </div>
+        <div class="mem-toolbar">
+          <span class="mem-lbl">Address (hex):</span>
+          <input class="mem-inp" id="mem-addr" value="0000" maxlength="5" onchange="renderMem()">
+          <span class="mem-lbl" id="mem-seg-lbl" style="color:#000080;">DS:0000</span>
+        </div>
+        <div class="mem-grid">
+          <div class="mem-hdr">
+            <span class="mha">Address</span>
+            <span class="mhb">
+              <span class="mhbc">00</span><span class="mhbc">01</span>
+              <span class="mhbc">02</span><span class="mhbc">03</span>
+              <span class="mhbc">04</span><span class="mhbc">05</span>
+              <span class="mhbc">06</span><span class="mhbc">07</span>
+            </span>
+            <span class="mhasc">ASCII</span>
+          </div>
+          <div id="mem-rows"></div>
+        </div>
+      </div>
+
+    </div><!-- /col-right -->
+  </div><!-- /mdi -->
+
+  <!-- Status Bar -->
+  <div id="sbar">
+    <div class="sp" id="sb-msg">Ready - Load a program and press [Single Step] or [Run]</div>
+    <div class="sp" id="sb-pc">PC: 0</div>
+    <div class="sp">8086 Real Mode</div>
+    <div class="sp">1MB RAM</div>
+  </div>
+
+</div><!-- /app-window -->
+
+<script>
+"use strict";
+// ============================================================
+//  8086 EMULATOR CORE
+// ============================================================
+const emu = {
+  regs:  {AX:0,BX:0,CX:0,DX:0,SI:0,DI:0,BP:0,SP:0xFFFF,IP:0},
+  flags: {CF:0,ZF:0,SF:0,OF:0,PF:0,AF:0,DF:0},
+  mem:   new Uint8Array(0x100000),
+  instrs:[],
+  pc:0, halted:false, steps:0,
+
+  getReg8(n){
+    n=n.toUpperCase();
+    const p=n[0]+'X';
+    return n[1]==='L'?this.regs[p]&0xFF:(this.regs[p]>>8)&0xFF;
+  },
+  setReg8(n,v){
+    n=n.toUpperCase();v&=0xFF;
+    const p=n[0]+'X';
+    this.regs[p]=n[1]==='L'?(this.regs[p]&0xFF00)|v:(this.regs[p]&0x00FF)|(v<<8);
+  },
+  getReg(n){
+    n=n.toUpperCase();
+    if(n in this.regs) return this.regs[n]&0xFFFF;
+    if(/^[ABCD][LH]$/.test(n)) return this.getReg8(n);
+    return 0;
+  },
+  setReg(n,v){
+    n=n.toUpperCase();
+    if(n in this.regs){this.regs[n]=v&0xFFFF;return;}
+    if(/^[ABCD][LH]$/.test(n)) this.setReg8(n,v);
+  },
+  isReg(n){n=n.toUpperCase();return(n in this.regs)||/^[ABCD][LH]$/.test(n);},
+  regSz(n){return/^[ABCD][LH]$/i.test(n)?8:16;},
+  r8(a){return this.mem[a&0xFFFFF];},
+  r16(a){a&=0xFFFFF;return this.mem[a]|(this.mem[(a+1)&0xFFFFF]<<8);},
+  w8(a,v){this.mem[a&0xFFFFF]=v&0xFF;},
+  w16(a,v){a&=0xFFFFF;this.mem[a]=v&0xFF;this.mem[(a+1)&0xFFFFF]=(v>>8)&0xFF;},
+
+  updFlags(res,sz,op,a,b){
+    const mask=sz===8?0xFF:0xFFFF,msb=sz===8?0x80:0x8000;
+    res&=mask;
+    this.flags.ZF=res===0?1:0;
+    this.flags.SF=(res&msb)?1:0;
+    let p=res&0xFF;p^=p>>4;p^=p>>2;p^=p>>1;this.flags.PF=(~p&1)&1;
+    if(op==='ADD'){this.flags.CF=(a+b)>mask?1:0;this.flags.OF=((~(a^b)&(a^res))&msb)?1:0;}
+    else if(op==='SUB'||op==='CMP'){this.flags.CF=a<b?1:0;this.flags.OF=(((a^b)&(a^res))&msb)?1:0;}
+    else{this.flags.CF=0;this.flags.OF=0;}
+  },
+  reset(){
+    for(const k in this.regs)this.regs[k]=0;
+    this.regs.SP=0xFFFF;
+    for(const k in this.flags)this.flags[k]=0;
+    this.mem.fill(0);
+    this.pc=0;this.halted=false;this.steps=0;
+  }
+};
+
+// ============================================================
+//  PARSER
+// ============================================================
+function parseImm(s){
+  if(!s)return null;
+  s=s.trim().toUpperCase().replace(/\s+/g,'');
+  if(/^[0-9A-F]+H$/.test(s))return parseInt(s.slice(0,-1),16);
+  if(/^[01]+B$/.test(s))return parseInt(s.slice(0,-1),2);
+  if(/^[0-9]+D?$/.test(s))return parseInt(s,10);
+  if(/^0X[0-9A-F]+$/i.test(s))return parseInt(s,16);
+  return null;
+}
+function resolveEA(inner){
+  inner=inner.trim().toUpperCase();
+  // strip segment prefix
+  inner=inner.replace(/^[CDSE]S:/,'');
+  let addr=0,sign=1;
+  const toks=inner.split(/([+\-])/);
+  for(const t of toks){
+    if(t==='+'){sign=1;continue;}if(t==='-'){sign=-1;continue;}
+    const tv=t.trim();if(!tv)continue;
+    if(emu.isReg(tv))addr+=sign*emu.getReg(tv);
+    else{const v=parseImm(tv);if(v!==null)addr+=sign*v;else{const h=parseInt(tv,16);if(!isNaN(h))addr+=sign*h;}}
+    sign=1;
+  }
+  return addr&0xFFFF;
+}
+function resolveOp(op){
+  op=op.trim().replace(/^[CDSE]S:/i,'');
+  const mm=op.match(/^\[(.+)\]$/);
+  if(mm){const addr=resolveEA(mm[1]);return{val:emu.r16(addr),addr,isAddr:true,sz:16};}
+  const mm8=op.match(/^BYTE PTR\s+\[(.+)\]$/i)||op.match(/^BYTE\s+\[(.+)\]$/i);
+  if(mm8){const addr=resolveEA(mm8[1]);return{val:emu.r8(addr),addr,isAddr:true,sz:8};}
+  if(emu.isReg(op)){const sz=emu.regSz(op);return{val:emu.getReg(op),isAddr:false,sz};}
+  const imm=parseImm(op);
+  if(imm!==null)return{val:imm,isImm:true,sz:16};
+  return{val:null,isLabel:true,label:op.toUpperCase()};
+}
+function writeOp(op,val,sz){
+  op=op.trim().replace(/^[CDSE]S:/i,'');
+  const mm=op.match(/^\[(.+)\]$/);
+  if(mm){const addr=resolveEA(mm[1]);sz===8?emu.w8(addr,val):emu.w16(addr,val);return;}
+  if(emu.isReg(op))emu.setReg(op,val);
+}
+function parseCode(code){
+  const lines=code.split('\n'),instrs=[],lmap={};
+  let idx=0;
+  for(let i=0;i<lines.length;i++){
+    let line=lines[i].replace(/;.*/,'').trim();
+    if(!line)continue;
+    // label
+    const lm=line.match(/^(\w+)\s*:\s*(.*)$/);
+    if(lm){lmap[lm[1].toUpperCase()]=idx;line=lm[2].trim();if(!line)continue;}
+    // split operands respecting brackets
+    let dep=0,cur='',parts=[];
+    for(const ch of line){if(ch==='[')dep++;if(ch===']')dep--;if(ch===','&&dep===0){parts.push(cur.trim());cur='';}else cur+=ch;}
+    parts.push(cur.trim());parts=parts.filter(p=>p!=='');
+    const mw=line.match(/^(\w+)\s*(.*)?$/);
+    if(!mw)continue;
+    instrs.push({li:i,raw:line,mnem:mw[1].toUpperCase(),ops:parts,lmap});
+    idx++;
+  }
+  return{instrs,lmap};
+}
+
+// ============================================================
+//  EXECUTE
+// ============================================================
+function h(n,sz){const m=sz===8?0xFF:0xFFFF;return(n&m).toString(16).toUpperCase().padStart(sz/4,'0')+'h';}
+function ok(m){return{ok:true,msg:m};}
+function er(m){return{ok:false,msg:m};}
+function jmp(mn,op,lmap,cond,desc){
+  if(cond){
+    const lbl=op.trim().toUpperCase();
+    if(lbl in lmap){emu.pc=lmap[lbl];return{ok:true,msg:`${mn.padEnd(5)} -> jump to "${lbl}"  (${desc})`,jumped:true};}
+    const imm=parseImm(op);if(imm!==null){emu.pc=imm;return{ok:true,msg:`${mn} -> ${h(imm,16)}`,jumped:true};}
+  }
+  return ok(`${mn.padEnd(5)} no jump  (${desc})`);
+}
+function execOne(in_){
+  const{mnem:M,ops,lmap}=in_;
+  try{
+    switch(M){
+    case'MOV':{
+      if(ops.length!==2)return er('MOV needs 2 operands');
+      const s=resolveOp(ops[1]);if(s.val===null)return er('MOV: invalid src: '+ops[1]);
+      const sz=emu.regSz(ops[0].trim())===8?8:16;
+      writeOp(ops[0],s.val,sz);
+      return ok(`MOV  ${ops[0]}, ${ops[1]}  ->  ${ops[0]} = ${h(s.val,sz)}`);
+    }
+    case'ADD':{
+      const d=resolveOp(ops[0]),s=resolveOp(ops[1]);
+      const sz=d.sz,r=(d.val+s.val)&(sz===8?0xFF:0xFFFF);
+      emu.updFlags(r,sz,'ADD',d.val,s.val);writeOp(ops[0],r,sz);
+      return ok(`ADD  ${ops[0]}, ${ops[1]}  ->  ${h(d.val,sz)} + ${h(s.val,sz)} = ${h(r,sz)}`);
+    }
+    case'SUB':{
+      const d=resolveOp(ops[0]),s=resolveOp(ops[1]);
+      const sz=d.sz,r=(d.val-s.val)&(sz===8?0xFF:0xFFFF);
+      emu.updFlags(r,sz,'SUB',d.val,s.val);writeOp(ops[0],r,sz);
+      return ok(`SUB  ${ops[0]}, ${ops[1]}  ->  ${h(d.val,sz)} - ${h(s.val,sz)} = ${h(r,sz)}`);
+    }
+    case'MUL':{
+      const s=resolveOp(ops[0]);
+      if(s.sz===8){const r=emu.getReg('AL')*s.val;emu.setReg('AX',r&0xFFFF);emu.flags.CF=emu.flags.OF=r>0xFF?1:0;return ok(`MUL  ${ops[0]}  ->  AX = ${h(r&0xFFFF,16)}`);}
+      const r=emu.getReg('AX')*s.val;emu.setReg('AX',r&0xFFFF);emu.setReg('DX',(r>>16)&0xFFFF);
+      emu.flags.CF=emu.flags.OF=emu.getReg('DX')!==0?1:0;
+      return ok(`MUL  ${ops[0]}  ->  DX:AX = ${h(emu.getReg('DX'),16)}:${h(emu.getReg('AX'),16)}`);
+    }
+    case'DIV':{
+      const s=resolveOp(ops[0]);if(!s.val)return er('DIV: division by zero');
+      if(s.sz===8){const ax=emu.getReg('AX');emu.setReg8('AL',Math.floor(ax/s.val));emu.setReg8('AH',ax%s.val);return ok(`DIV  ${ops[0]}  ->  AL=${h(emu.getReg8('AL'),8)} AH(rem)=${h(emu.getReg8('AH'),8)}`);}
+      const dxax=(emu.getReg('DX')<<16)|emu.getReg('AX');emu.setReg('AX',Math.floor(dxax/s.val)&0xFFFF);emu.setReg('DX',dxax%s.val);
+      return ok(`DIV  ${ops[0]}  ->  AX=${h(emu.getReg('AX'),16)} DX(rem)=${h(emu.getReg('DX'),16)}`);
+    }
+    case'INC':{const d=resolveOp(ops[0]),sz=d.sz,r=(d.val+1)&(sz===8?0xFF:0xFFFF);emu.updFlags(r,sz,'ADD',d.val,1);writeOp(ops[0],r,sz);return ok(`INC  ${ops[0]}  ->  ${h(d.val,sz)} -> ${h(r,sz)}`);}
+    case'DEC':{const d=resolveOp(ops[0]),sz=d.sz,r=(d.val-1)&(sz===8?0xFF:0xFFFF);emu.updFlags(r,sz,'SUB',d.val,1);writeOp(ops[0],r,sz);return ok(`DEC  ${ops[0]}  ->  ${h(d.val,sz)} -> ${h(r,sz)}`);}
+    case'CMP':{
+      const a=resolveOp(ops[0]),b=resolveOp(ops[1]),sz=a.sz;
+      const r=(a.val-b.val)&(sz===8?0xFF:0xFFFF);emu.updFlags(r,sz,'CMP',a.val,b.val);
+      return ok(`CMP  ${ops[0]}, ${ops[1]}  ->  ${h(a.val,sz)} vs ${h(b.val,sz)}  ZF=${emu.flags.ZF} CF=${emu.flags.CF}`);
+    }
+    case'JMP':{
+      const lbl=ops[0].trim().toUpperCase();
+      if(lbl in lmap){emu.pc=lmap[lbl];return{ok:true,msg:`JMP  -> "${lbl}"`,jumped:true};}
+      const imm=parseImm(ops[0]);if(imm!==null){emu.pc=imm;return{ok:true,msg:`JMP  -> ${h(imm,16)}`,jumped:true};}
+      return er(`JMP: label "${lbl}" not found`);
+    }
+    case'JE':case'JZ':    return jmp(M,ops[0],lmap,emu.flags.ZF===1,`ZF=${emu.flags.ZF}`);
+    case'JNE':case'JNZ':  return jmp(M,ops[0],lmap,emu.flags.ZF===0,`ZF=${emu.flags.ZF}`);
+    case'JBE':case'JNA':  return jmp(M,ops[0],lmap,emu.flags.CF||emu.flags.ZF,`CF=${emu.flags.CF} ZF=${emu.flags.ZF}`);
+    case'JA':case'JNBE':  return jmp(M,ops[0],lmap,!emu.flags.CF&&!emu.flags.ZF,`CF=${emu.flags.CF} ZF=${emu.flags.ZF}`);
+    case'JL':case'JNGE':  return jmp(M,ops[0],lmap,emu.flags.SF!==emu.flags.OF,`SF=${emu.flags.SF} OF=${emu.flags.OF}`);
+    case'JGE':case'JNL':  return jmp(M,ops[0],lmap,emu.flags.SF===emu.flags.OF,`SF=${emu.flags.SF} OF=${emu.flags.OF}`);
+    case'JG':case'JNLE':  return jmp(M,ops[0],lmap,!emu.flags.ZF&&emu.flags.SF===emu.flags.OF,`ZF=${emu.flags.ZF}`);
+    case'JLE':case'JNG':  return jmp(M,ops[0],lmap,emu.flags.ZF||emu.flags.SF!==emu.flags.OF,`ZF=${emu.flags.ZF}`);
+    case'JC':case'JB':case'JNAE': return jmp(M,ops[0],lmap,emu.flags.CF===1,`CF=${emu.flags.CF}`);
+    case'JNC':case'JAE':case'JNB':return jmp(M,ops[0],lmap,emu.flags.CF===0,`CF=${emu.flags.CF}`);
+    case'JS':  return jmp(M,ops[0],lmap,emu.flags.SF===1,`SF=${emu.flags.SF}`);
+    case'JNS': return jmp(M,ops[0],lmap,emu.flags.SF===0,`SF=${emu.flags.SF}`);
+    case'LOOP':{
+      emu.setReg('CX',(emu.getReg('CX')-1)&0xFFFF);
+      if(emu.getReg('CX')!==0){
+        const lbl=ops[0].trim().toUpperCase();
+        if(lbl in lmap){emu.pc=lmap[lbl];return{ok:true,msg:`LOOP -> "${lbl}"  CX=${h(emu.getReg('CX'),16)}`,jumped:true};}
+      }
+      return ok(`LOOP  exit (CX=0000h)`);
+    }
+    case'SHL':case'SAL':{
+      const d=resolveOp(ops[0]);
+      const cnt=ops[1]?(resolveOp(ops[1]).val&0x1F):1;
+      const sz=d.sz,r=(d.val<<cnt)&(sz===8?0xFF:0xFFFF);
+      if(cnt)emu.flags.CF=(d.val>>(sz-cnt))&1;
+      emu.updFlags(r,sz,'SHL',0,0);writeOp(ops[0],r,sz);
+      return ok(`SHL  ${ops[0]}, ${cnt}  ->  ${h(d.val,sz)} << ${cnt} = ${h(r,sz)}`);
+    }
+    case'SHR':{
+      const d=resolveOp(ops[0]);
+      const cnt=ops[1]?(resolveOp(ops[1]).val&0x1F):1;
+      const sz=d.sz,r=(d.val>>>cnt)&(sz===8?0xFF:0xFFFF);
+      if(cnt)emu.flags.CF=(d.val>>(cnt-1))&1;
+      emu.updFlags(r,sz,'SHR',0,0);writeOp(ops[0],r,sz);
+      return ok(`SHR  ${ops[0]}, ${cnt}  ->  ${h(d.val,sz)} >> ${cnt} = ${h(r,sz)}`);
+    }
+    case'OR':{
+      const d=resolveOp(ops[0]),s=resolveOp(ops[1]),sz=d.sz;
+      const r=(d.val|s.val)&(sz===8?0xFF:0xFFFF);emu.flags.CF=emu.flags.OF=0;
+      emu.updFlags(r,sz,'OR',0,0);writeOp(ops[0],r,sz);
+      return ok(`OR   ${ops[0]}, ${ops[1]}  ->  ${h(d.val,sz)} | ${h(s.val,sz)} = ${h(r,sz)}`);
+    }
+    case'AND':{
+      const d=resolveOp(ops[0]),s=resolveOp(ops[1]),sz=d.sz;
+      const r=(d.val&s.val)&(sz===8?0xFF:0xFFFF);emu.flags.CF=emu.flags.OF=0;
+      emu.updFlags(r,sz,'AND',0,0);writeOp(ops[0],r,sz);
+      return ok(`AND  ${ops[0]}, ${ops[1]}  ->  ${h(d.val,sz)} & ${h(s.val,sz)} = ${h(r,sz)}`);
+    }
+    case'XOR':{
+      const d=resolveOp(ops[0]),s=resolveOp(ops[1]),sz=d.sz;
+      const r=(d.val^s.val)&(sz===8?0xFF:0xFFFF);emu.flags.CF=emu.flags.OF=0;
+      emu.updFlags(r,sz,'XOR',0,0);writeOp(ops[0],r,sz);
+      return ok(`XOR  ${ops[0]}, ${ops[1]}  ->  ${h(d.val,sz)} ^ ${h(s.val,sz)} = ${h(r,sz)}`);
+    }
+    case'NOT':{const d=resolveOp(ops[0]),sz=d.sz,r=(~d.val)&(sz===8?0xFF:0xFFFF);writeOp(ops[0],r,sz);return ok(`NOT  ${ops[0]}  ->  ~${h(d.val,sz)} = ${h(r,sz)}`);}
+    case'NEG':{const d=resolveOp(ops[0]),sz=d.sz,r=(-d.val)&(sz===8?0xFF:0xFFFF);emu.updFlags(r,sz,'SUB',0,d.val);writeOp(ops[0],r,sz);return ok(`NEG  ${ops[0]}  ->  -${h(d.val,sz)} = ${h(r,sz)}`);}
+    case'XCHG':{const a=resolveOp(ops[0]),b=resolveOp(ops[1]);writeOp(ops[0],b.val,a.sz);writeOp(ops[1],a.val,b.sz);return ok(`XCHG ${ops[0]}, ${ops[1]}  ->  ${h(a.val,a.sz)} <-> ${h(b.val,b.sz)}`);}
+    case'PUSH':{const s=resolveOp(ops[0]);emu.regs.SP=(emu.regs.SP-2)&0xFFFF;emu.w16(emu.regs.SP,s.val);return ok(`PUSH ${ops[0]}  ->  SP=${h(emu.regs.SP,16)} [${h(s.val,16)}]`);}
+    case'POP':{const v=emu.r16(emu.regs.SP);writeOp(ops[0],v,16);emu.regs.SP=(emu.regs.SP+2)&0xFFFF;return ok(`POP  ${ops[0]}  ->  ${ops[0]}=${h(v,16)} SP=${h(emu.regs.SP,16)}`);}
+    case'NOP':return ok('NOP');
+    case'HLT':emu.halted=true;return{ok:true,msg:'HLT  - processor halted.',halted:true};
+    case'INT':{const n=parseImm(ops[0]);return ok(`INT  ${h(n||0,8)} (simulated)`);}
+    case'DB':case'DW':return ok(`${M}  (data directive - skipped)`);
+    default:return er(`Unknown instruction: "${M}"`);
+    }
+  }catch(e){return er(`Runtime error: ${e.message}`);}
+}
+
+// ============================================================
+//  STATE TRACKING
+// ============================================================
+let pReg={},pFlag={},pMem=new Uint8Array(256);
+function snap(){
+  for(const k in emu.regs)pReg[k]=emu.regs[k];
+  for(const k in emu.flags)pFlag[k]=emu.flags[k];
+  pMem.set(emu.mem.slice(0,256));
+}
+
+// ============================================================
+//  RENDER REGISTERS
+// ============================================================
+function renderRegs(){
+  const GR=['AX','BX','CX','DX'],IR=['SI','DI','BP','SP'];
+  const SB={AX:['AH','AL'],BX:['BH','BL'],CX:['CH','CL'],DX:['DH','DL']};
+
+  function row(n){
+    const v=emu.getReg(n),chg=pReg[n]!==undefined&&pReg[n]!==v;
+    const sb=SB[n];
+    const ah=sb?`<span class="rah">${h(emu.getReg8(sb[0]),8)}</span>`:'<span></span>';
+    const al=sb?`<span class="ral">${h(emu.getReg8(sb[1]),8)}</span>`:'<span></span>';
+    return`<div class="reg-row${chg?' chg':''}"><span class="rn">${n}</span><span class="rh">${h(v,16)}</span><span class="rd">${v}</span>${ah}${al}</div>`;
+  }
+  document.getElementById('rg-gen').innerHTML=GR.map(row).join('');
+  document.getElementById('rg-idx').innerHTML=IR.map(row).join('');
+  const ip=emu.regs.IP;
+  document.getElementById('rg-ip').innerHTML=`<div class="reg-row"><span class="rn">IP</span><span class="rh">${h(ip,16)}</span><span class="rd">${ip}</span><span></span><span></span></div>`;
+
+  const FL=['CF','ZF','SF','OF','PF','AF','DF'];
+  document.getElementById('flags-area').innerHTML=FL.map(f=>`<div class="fl"><span class="fl-n">${f}</span><span class="fl-v${emu.flags[f]?' set':''}">${emu.flags[f]}</span></div>`).join('');
+
+  document.getElementById('tb-ip').textContent=h(emu.regs.IP,16).slice(0,-1);
+  document.getElementById('tb-steps').textContent=emu.steps;
+  document.getElementById('sb-pc').textContent='PC: '+emu.pc;
+}
+
+// ============================================================
+//  RENDER MEMORY
+// ============================================================
+function renderMem(){
+  const base=parseInt(document.getElementById('mem-addr').value,16)||0;
+  document.getElementById('mem-seg-lbl').textContent='DS:'+base.toString(16).toUpperCase().padStart(4,'0');
+  const ROWS=20,COLS=8;let html='';
+  for(let r=0;r<ROWS;r++){
+    const addr=(base+r*COLS)&0xFFFF;
+    let bytes='',ascii='';
+    for(let c=0;c<COLS;c++){
+      const a=addr+c,v=emu.mem[a],chg=pMem[a]!==v;
+      bytes+=`<span class="mbc${chg?' chg':v?' nz':''}">${v.toString(16).toUpperCase().padStart(2,'0')}</span>`;
+      ascii+=(v>=32&&v<127)?String.fromCharCode(v):'.';
+    }
+    html+=`<div class="mem-row"><span class="ma">${addr.toString(16).toUpperCase().padStart(4,'0')}:${(0).toString(16).padStart(4,'0')}</span><span class="mb">${bytes}</span><span class="masc">${ascii}</span></div>`;
+  }
+  document.getElementById('mem-rows').innerHTML=html;
+}
+
+// ============================================================
+//  LINE NUMBERS
+// ============================================================
+function renderLineNums(){
+  const lines=document.getElementById('code-ed').value.split('\n');
+  document.getElementById('line-nums').innerHTML=lines.map((_,i)=>`<div>${i+1}</div>`).join('');
+}
+function hilightLine(li){
+  const el=document.getElementById('line-hl');
+  if(li==null){el.style.display='none';return;}
+  el.style.top=(2+li*15)+'px';el.style.display='block';
+  document.getElementById('tb-line').textContent=li+1;
+}
+
+// ============================================================
+//  LOG
+// ============================================================
+let logbuf=[];
+function lg(m,c='lok'){
+  logbuf.push(`<div class="${c}">${m}</div>`);
+  if(logbuf.length>600)logbuf.shift();
+  const el=document.getElementById('emu-out');
+  el.innerHTML=logbuf.join('');el.scrollTop=el.scrollHeight;
+}
+function setSt(m,c=''){
+  const el=document.getElementById('sb-msg');el.textContent=m;el.className='sp '+(c||'');
+}
+
+// ============================================================
+//  CONTROL
+// ============================================================
+function stepExec(){
+  if(emu.halted){setSt('Processor halted. Press Reload.','warn');return;}
+  if(emu.pc>=emu.instrs.length){setSt('End of program. Press Reload.','warn');emu.halted=true;return;}
+  snap();
+  const instr=emu.instrs[emu.pc];
+  const prevPc=emu.pc;
+  emu.pc++;
+  const res=execOne(instr);
+  if(res.halted)emu.halted=true;
+  emu.regs.IP=emu.pc;emu.steps++;
+  hilightLine(instr.li);
+  renderRegs();renderMem();
+  lg(`[${String(prevPc).padStart(3,'0')}]  ${res.msg}`,res.ok?'lstep':'lerr');
+  setSt(res.msg,res.ok?'ok':'err');
+}
+
+function runAll(){
+  if(emu.halted){reloadEmu();return;}
+  let s=0;snap();
+  while(!emu.halted&&emu.pc<emu.instrs.length&&s<50000){
+    const in_=emu.instrs[emu.pc];emu.pc++;
+    const r=execOne(in_);if(r.halted)emu.halted=true;s++;
+  }
+  emu.regs.IP=emu.pc;emu.steps+=s;
+  renderRegs();renderMem();
+  hilightLine(emu.instrs[Math.max(0,emu.pc-1)]?.li);
+  lg(`Run complete: ${s} instructions executed.`,'linfo');
+  setSt(`Run complete: ${s} instructions executed`,'ok');
+}
+
+function reloadEmu(){
+  emu.reset();
+  const{instrs}=parseCode(document.getElementById('code-ed').value);
+  emu.instrs=instrs;
+  logbuf=[];snap();
+  renderRegs();renderMem();
+  hilightLine(null);
+  document.getElementById('tb-line').textContent='\u2014';
+  lg(`Assembled OK: ${instrs.length} instruction(s) loaded.  Press [Single Step] or [Run].`,'linfo');
+  setSt(`Assembled: ${instrs.length} instructions. Ready.`,'ok');
+}
+
+// ============================================================
+//  EDITOR EVENTS
+// ============================================================
+const ed=document.getElementById('code-ed');
+ed.addEventListener('input',renderLineNums);
+ed.addEventListener('scroll',()=>{document.getElementById('line-nums').scrollTop=ed.scrollTop;});
+ed.addEventListener('keydown',e=>{
+  if(e.key==='Tab'){e.preventDefault();const s=ed.selectionStart;ed.value=ed.value.slice(0,s)+'        '+ed.value.slice(ed.selectionEnd);ed.selectionStart=ed.selectionEnd=s+8;renderLineNums();}
+  if(e.key==='F8'){e.preventDefault();stepExec();}
+  if(e.key==='F5'){e.preventDefault();runAll();}
+  if(e.key==='F2'){e.preventDefault();reloadEmu();}
+});
+document.addEventListener('keydown',e=>{
+  if(document.activeElement===ed)return;
+  if(e.key==='F8'){e.preventDefault();stepExec();}
+  if(e.key==='F5'){e.preventDefault();runAll();}
+  if(e.key==='F2'){e.preventDefault();reloadEmu();}
+});
+
+// ============================================================
+//  DEFAULT PROGRAM
+// ============================================================
+ed.value=`; ================================================
+; emu8086 - Demo Program
+; ================================================
+; Keyboard shortcuts:
+;   F8 = Single Step     F5 = Run     F2 = Reload
+
+        MOV     AX, 0005h       ; AX = 5
+        MOV     BX, 0003h       ; BX = 3
+        ADD     AX, BX          ; AX = AX + BX  (= 8)
+        MOV     CX, AX          ; CX = AX
+
+        MOV     DX, 000Ah       ; DX = 10
+        SUB     DX, CX          ; DX = 10 - 8  (= 2)
+        CMP     AX, 0008h       ; compare AX with 8  -> sets ZF
+
+; --- Loop: write counter values to memory ---
+        MOV     CX, 0004h       ; loop counter = 4
+        MOV     SI, 0010h       ; destination pointer
+WLOOP:
+        MOV     [SI], CX        ; memory[SI] = CX
+        INC     SI
+        INC     SI              ; advance pointer (word = 2 bytes)
+        LOOP    WLOOP           ; CX--, if CX<>0 jump
+
+; --- Bit manipulation ---
+        MOV     AX, 0001h
+        SHL     AX, 0003h       ; AX = 0001h << 3 = 0008h
+        OR      AX, 0010h       ; AX = 0008h | 0010h = 0018h
+        AND     AX, 001Fh       ; AX = 0018h & 001Fh = 0018h
+        XOR     BX, BX          ; BX = 0 (clear)
+
+        HLT                     ; halt processor
+`;
+
+renderLineNums();
+reloadEmu();
+</script>
+</body>
+</html>
