@@ -421,7 +421,7 @@ body {
 <script>
 "use strict";
 // ============================================================
-//  8086 EMULATOR CORE
+//  8086 EMULATOR CORE  — emu8086-compatible
 // ============================================================
 const emu = {
   regs:  {AX:0,BX:0,CX:0,DX:0,SI:0,DI:0,BP:0,SP:0xFFFF,IP:0},
@@ -490,56 +490,271 @@ function parseImm(s){
   return null;
 }
 function resolveEA(inner){
-  inner=inner.trim().toUpperCase();
-  // strip segment prefix
-  inner=inner.replace(/^[CDSE]S:/,'');
+  inner=inner.trim().toUpperCase().replace(/^[CDSE]S:/,'');
   let addr=0,sign=1;
   const toks=inner.split(/([+\-])/);
   for(const t of toks){
     if(t==='+'){sign=1;continue;}if(t==='-'){sign=-1;continue;}
     const tv=t.trim();if(!tv)continue;
-    if(emu.isReg(tv))addr+=sign*emu.getReg(tv);
-    else{const v=parseImm(tv);if(v!==null)addr+=sign*v;else{const h=parseInt(tv,16);if(!isNaN(h))addr+=sign*h;}}
+    if(emu.isReg(tv)) addr+=sign*emu.getReg(tv);
+    else if(tv in symTable) addr+=sign*symTable[tv].addr;
+    else{const v=parseImm(tv);if(v!==null)addr+=sign*v;else{const hv=parseInt(tv,16);if(!isNaN(hv))addr+=sign*hv;}}
     sign=1;
   }
   return addr&0xFFFF;
 }
-function resolveOp(op){
-  op=op.trim().replace(/^[CDSE]S:/i,'');
-  const mm=op.match(/^\[(.+)\]$/);
-  if(mm){const addr=resolveEA(mm[1]);return{val:emu.r16(addr),addr,isAddr:true,sz:16};}
-  const mm8=op.match(/^BYTE PTR\s+\[(.+)\]$/i)||op.match(/^BYTE\s+\[(.+)\]$/i);
-  if(mm8){const addr=resolveEA(mm8[1]);return{val:emu.r8(addr),addr,isAddr:true,sz:8};}
-  if(emu.isReg(op)){const sz=emu.regSz(op);return{val:emu.getReg(op),isAddr:false,sz};}
+function resolveOp(op, hintSz) {
+  op = op.trim().replace(/^[CDSE]S:/i,'');
+  // BYTE PTR [...] or WORD PTR [...]
+  const bpm = op.match(/^BYTE\s+PTR\s+\[(.+)\]$/i) || op.match(/^BYTE\s+\[(.+)\]$/i);
+  if (bpm) { const addr=resolveEA(bpm[1]); return{val:emu.r8(addr),addr,isAddr:true,sz:8}; }
+  const wpm = op.match(/^WORD\s+PTR\s+\[(.+)\]$/i) || op.match(/^WORD\s+\[(.+)\]$/i);
+  if (wpm) { const addr=resolveEA(wpm[1]); return{val:emu.r16(addr),addr,isAddr:true,sz:16}; }
+  // [expr]
+  const mm = op.match(/^\[(.+)\]$/);
+  if (mm) {
+    // check if inner is a variable name
+    const inner = mm[1].trim().toUpperCase();
+    if (inner in symTable && symTable[inner].size>0) {
+      const addr=symTable[inner].addr, sz=symTable[inner].size;
+      return{val:sz===1?emu.r8(addr):emu.r16(addr),addr,isAddr:true,sz:sz*8};
+    }
+    const addr=resolveEA(mm[1]);
+    const sz=hintSz||16;
+    return{val:sz===8?emu.r8(addr):emu.r16(addr),addr,isAddr:true,sz};
+  }
+  // register
+  if (emu.isReg(op)) { const sz=emu.regSz(op); return{val:emu.getReg(op),isAddr:false,sz}; }
+  // char literal
+  const cm = op.match(/^'(.)'$/);
+  if (cm) return{val:cm[1].charCodeAt(0),isImm:true,sz:8};
+  // immediate
   const imm=parseImm(op);
-  if(imm!==null)return{val:imm,isImm:true,sz:16};
-  return{val:null,isLabel:true,label:op.toUpperCase()};
+  if (imm!==null) return{val:imm,isImm:true,sz:16};
+  // variable name (bare, without brackets) -> load from memory like emu8086
+  const uop=op.toUpperCase();
+  if (uop in symTable) {
+    const sym=symTable[uop];
+    if (sym.isEqu) return{val:sym.value,isImm:true,sz:16};
+    const sz=sym.size*8||16;
+    const val=sym.size===1?emu.r8(sym.addr):emu.r16(sym.addr);
+    return{val,addr:sym.addr,isAddr:true,sz};
+  }
+  return{val:null,isLabel:true,label:uop};
 }
-function writeOp(op,val,sz){
-  op=op.trim().replace(/^[CDSE]S:/i,'');
-  const mm=op.match(/^\[(.+)\]$/);
-  if(mm){const addr=resolveEA(mm[1]);sz===8?emu.w8(addr,val):emu.w16(addr,val);return;}
-  if(emu.isReg(op))emu.setReg(op,val);
+function writeOp(op, val, sz) {
+  op = op.trim().replace(/^[CDSE]S:/i,'');
+  const bpm = op.match(/^BYTE\s+(?:PTR\s+)?\[(.+)\]$/i);
+  if (bpm) { emu.w8(resolveEA(bpm[1]),val); return; }
+  const wpm = op.match(/^WORD\s+(?:PTR\s+)?\[(.+)\]$/i);
+  if (wpm) { emu.w16(resolveEA(wpm[1]),val); return; }
+  const mm = op.match(/^\[(.+)\]$/);
+  if (mm) {
+    const inner=mm[1].trim().toUpperCase();
+    if (inner in symTable && symTable[inner].size>0) {
+      const sym=symTable[inner];
+      sym.size===1?emu.w8(sym.addr,val):emu.w16(sym.addr,val); return;
+    }
+    const addr=resolveEA(mm[1]);
+    sz===8?emu.w8(addr,val):emu.w16(addr,val); return;
+  }
+  if (emu.isReg(op)) { emu.setReg(op,val); return; }
+  // bare variable name
+  const uop=op.toUpperCase();
+  if (uop in symTable && !symTable[uop].isEqu) {
+    const sym=symTable[uop];
+    sym.size===1?emu.w8(sym.addr,val):emu.w16(sym.addr,val);
+  }
 }
-function parseCode(code){
-  const lines=code.split('\n'),instrs=[],lmap={};
-  let idx=0;
-  for(let i=0;i<lines.length;i++){
-    let line=lines[i].replace(/;.*/,'').trim();
-    if(!line)continue;
-    // label
-    const lm=line.match(/^(\w+)\s*:\s*(.*)$/);
-    if(lm){lmap[lm[1].toUpperCase()]=idx;line=lm[2].trim();if(!line)continue;}
-    // split operands respecting brackets
-    let dep=0,cur='',parts=[];
-    for(const ch of line){if(ch==='[')dep++;if(ch===']')dep--;if(ch===','&&dep===0){parts.push(cur.trim());cur='';}else cur+=ch;}
-    parts.push(cur.trim());parts=parts.filter(p=>p!=='');
-    const mw=line.match(/^(\w+)\s*(.*)?$/);
-    if(!mw)continue;
-    instrs.push({li:i,raw:line,mnem:mw[1].toUpperCase(),ops:parts,lmap});
+// ============================================================
+//  FULL PARSER — handles ORG, DB, DW, EQU, RET, char literals,
+//  variable references, BYTE/WORD PTR, [cite:N] stripping
+// ============================================================
+
+// Global symbol table: name -> { addr, size(1|2), value }
+let symTable = {};
+// ORG base (default 0x100 for COM files)
+let orgBase  = 0;
+
+function parseImm(s) {
+  if (!s) return null;
+  s = s.trim().replace(/\s+/g,'');
+  // strip [cite: N] noise from OCR/PDF artifacts
+  s = s.replace(/\[cite\s*:\s*\d+\]/gi,'').trim();
+  if (!s) return null;
+  const U = s.toUpperCase();
+  // char literal: 'X'
+  const cm = s.match(/^'(.)'$/);
+  if (cm) return cm[1].charCodeAt(0);
+  if (/^[0-9A-F]+H$/i.test(U))  return parseInt(U.slice(0,-1),16);
+  if (/^[01]+B$/i.test(U))       return parseInt(U.slice(0,-1),2);
+  if (/^[0-9]+D?$/i.test(U))     return parseInt(U,10);
+  if (/^0X[0-9A-F]+$/i.test(U))  return parseInt(U,16);
+  return null;
+}
+
+function splitOps(rest) {
+  // Split by comma respecting brackets and char literals
+  let dep=0, inChar=false, cur='', parts=[];
+  for (let i=0;i<rest.length;i++) {
+    const ch=rest[i];
+    if (ch==="'" && !inChar) { inChar=true; cur+=ch; continue; }
+    if (ch==="'" && inChar)  { inChar=false; cur+=ch; continue; }
+    if (inChar) { cur+=ch; continue; }
+    if (ch==='[') dep++;
+    if (ch===']') dep--;
+    if (ch===',' && dep===0) { parts.push(cur.trim()); cur=''; }
+    else cur+=ch;
+  }
+  parts.push(cur.trim());
+  return parts.filter(p=>p!=='');
+}
+
+function parseCode(code) {
+  const lines  = code.split('\n');
+  const instrs = [];
+  const lmap   = {};   // label -> instruction index
+  const dataItems = []; // {name,size,values,li} collected in pass1
+
+  symTable = {};
+  orgBase  = 0x100; // default COM org
+
+  // ---- PASS 1: find ORG, labels, DB/DW, EQU ----
+  // We layout memory: code starts at orgBase.
+  // Data declarations go into memory at their position in the source
+  // (emu8086 COM model: data usually placed after code via RET).
+  // We first scan everything to build lmap and symTable,
+  // then assign addresses linearly in pass 2.
+
+  let instrCount = 0;
+  for (let i=0;i<lines.length;i++) {
+    // Strip comments including [cite: N] artifacts
+    let raw = lines[i].replace(/\[cite\s*:\s*\d+[,\s\d]*\]/gi,'')
+                      .replace(/;.*/,'').trim();
+    if (!raw) continue;
+
+    // ORG directive
+    const orgm = raw.match(/^ORG\s+(.+)$/i);
+    if (orgm) { orgBase = parseImm(orgm[1]) ?? orgBase; continue; }
+
+    // Label (standalone or inline)
+    let rest = raw;
+    const lm = raw.match(/^(\w+)\s*:\s*(.*)$/);
+    if (lm) {
+      lmap[lm[1].toUpperCase()] = instrCount; // points to next instr
+      rest = lm[2].trim();
+      if (!rest) continue;
+    }
+
+    const mw = rest.match(/^(\w+)\s*(.*)?$/);
+    if (!mw) continue;
+    const mnem = mw[1].toUpperCase();
+    const operandStr = (mw[2]||'').trim();
+
+    // Data directives — we'll handle memory placement in pass 2
+    if (mnem==='DB'||mnem==='DW') { instrCount++; }
+    else if (mnem==='EQU') { /* handled inline */ }
+    else if (mnem==='ORG'||mnem==='SEGMENT'||mnem==='ENDS'||mnem==='ASSUME'||mnem==='END') {}
+    else { instrCount++; }
+  }
+
+  // ---- PASS 2: full parse with sym resolution ----
+  // Layout: code lives at orgBase in memory.
+  // Data (DB/DW) declared after RET also in linear memory.
+  // We do two micro-passes: first assign addresses to named data,
+  // then parse instructions.
+
+  // Micro-pass A: find all named DB/DW and assign addresses
+  // after all code (we approximate: place data right after code bytes)
+  // For simplicity we place named data starting at orgBase+512 (like emu8086 .com)
+  // unless a specific label precedes the DB/DW.
+  let dataAddr = orgBase + 0x200; // will be refined below
+  let codeInstCount = 0;
+  for (let i=0;i<lines.length;i++) {
+    let raw = lines[i].replace(/\[cite\s*:\s*\d+[,\s\d]*\]/gi,'')
+                      .replace(/;.*/,'').trim();
+    if (!raw) continue;
+    const orgm = raw.match(/^ORG\s+(.+)$/i);
+    if (orgm) continue;
+    let rest = raw;
+    const lm = raw.match(/^(\w+)\s*:\s*(.*)$/);
+    let pendingLabel = null;
+    if (lm) { pendingLabel=lm[1].toUpperCase(); rest=lm[2].trim(); if(!rest)continue; }
+    const mw = rest.match(/^(\w+)\s*(.*)?$/);
+    if (!mw) continue;
+    const mnem=mw[1].toUpperCase(), operandStr=(mw[2]||'').trim();
+    if (mnem==='EQU') {
+      if (pendingLabel) { const v=parseImm(operandStr); if(v!==null) symTable[pendingLabel]={addr:v,size:0,value:v,isEqu:true}; }
+      continue;
+    }
+    if (mnem==='DB'||mnem==='DW') {
+      const sz = mnem==='DW'?2:1;
+      const vals = parseDataValues(operandStr, sz);
+      const addr = dataAddr;
+      if (pendingLabel) symTable[pendingLabel]={addr,size:sz,value:vals[0]??0};
+      // write into memory
+      for (let vi=0;vi<vals.length;vi++) {
+        if (sz===1) emu.w8(addr+vi, vals[vi]);
+        else emu.w16(addr+vi*2, vals[vi]);
+      }
+      dataAddr += vals.length * sz;
+      codeInstCount++;
+    } else if (!['ORG','SEGMENT','ENDS','ASSUME','END'].includes(mnem)) {
+      codeInstCount++;
+    }
+  }
+
+  // Micro-pass B: build instruction list
+  let idx = 0;
+  for (let i=0;i<lines.length;i++) {
+    let raw = lines[i].replace(/\[cite\s*:\s*\d+[,\s\d]*\]/gi,'')
+                      .replace(/;.*/,'').trim();
+    if (!raw) continue;
+    if (/^ORG\s+/i.test(raw)) continue;
+
+    let rest = raw;
+    const lm = raw.match(/^(\w+)\s*:\s*(.*)$/);
+    if (lm) {
+      lmap[lm[1].toUpperCase()] = idx;
+      rest = lm[2].trim();
+      if (!rest) continue;
+    }
+
+    const mw = rest.match(/^(\w+)\s*(.*)?$/);
+    if (!mw) continue;
+    const mnem = mw[1].toUpperCase();
+    const operandStr = (mw[2]||'').trim();
+
+    // Skip pure assembler directives (no runtime effect)
+    if (['SEGMENT','ENDS','ASSUME','END','EQU'].includes(mnem)) continue;
+    if (mnem==='ORG') continue;
+
+    const ops = splitOps(operandStr);
+    instrs.push({li:i, raw:rest, mnem, ops, lmap});
     idx++;
   }
-  return{instrs,lmap};
+
+  return {instrs, lmap};
+}
+
+function parseDataValues(str, sz) {
+  // Parse comma-separated values for DB/DW
+  // handles: 123, 0FFh, 'A', "Hello", ?
+  const parts = str.split(',').map(s=>s.trim());
+  const result = [];
+  for (const p of parts) {
+    if (p==='?') { result.push(0); continue; }
+    // string "..." or '...'
+    const sm = p.match(/^["'](.+)["']$/);
+    if (sm) {
+      for (const ch of sm[1]) result.push(ch.charCodeAt(0));
+      continue;
+    }
+    const v = parseImm(p);
+    if (v!==null) result.push(v & (sz===1?0xFF:0xFFFF));
+    else result.push(0);
+  }
+  return result;
 }
 
 // ============================================================
@@ -586,8 +801,15 @@ function execOne(in_){
       emu.flags.CF=emu.flags.OF=emu.getReg('DX')!==0?1:0;
       return ok(`MUL  ${ops[0]}  ->  DX:AX = ${h(emu.getReg('DX'),16)}:${h(emu.getReg('AX'),16)}`);
     }
+    case'RET':case'RETN':case'RETF':
+      emu.halted=true;
+      return{ok:true,msg:'RET  - program returned (halted)',halted:true};
+    case'DB':case'DW':
+      return ok(`${M}  (data in memory - skipped at runtime)`);
     case'DIV':{
-      const s=resolveOp(ops[0]);if(!s.val)return er('DIV: division by zero');
+      const s=resolveOp(ops[0]);
+      if(s.val===null) return er('DIV: invalid operand');
+      if(s.val===0) return er('DIV: division by zero (#DE)');
       if(s.sz===8){const ax=emu.getReg('AX');emu.setReg8('AL',Math.floor(ax/s.val));emu.setReg8('AH',ax%s.val);return ok(`DIV  ${ops[0]}  ->  AL=${h(emu.getReg8('AL'),8)} AH(rem)=${h(emu.getReg8('AH'),8)}`);}
       const dxax=(emu.getReg('DX')<<16)|emu.getReg('AX');emu.setReg('AX',Math.floor(dxax/s.val)&0xFFFF);emu.setReg('DX',dxax%s.val);
       return ok(`DIV  ${ops[0]}  ->  AX=${h(emu.getReg('AX'),16)} DX(rem)=${h(emu.getReg('DX'),16)}`);
@@ -667,7 +889,6 @@ function execOne(in_){
     case'NOP':return ok('NOP');
     case'HLT':emu.halted=true;return{ok:true,msg:'HLT  - processor halted.',halted:true};
     case'INT':{const n=parseImm(ops[0]);return ok(`INT  ${h(n||0,8)} (simulated)`);}
-    case'DB':case'DW':return ok(`${M}  (data directive - skipped)`);
     default:return er(`Unknown instruction: "${M}"`);
     }
   }catch(e){return er(`Runtime error: ${e.message}`);}
@@ -793,14 +1014,29 @@ function runAll(){
 
 function reloadEmu(){
   emu.reset();
+  // parseCode also resets symTable/orgBase and writes DB/DW to memory
   const{instrs}=parseCode(document.getElementById('code-ed').value);
   emu.instrs=instrs;
   logbuf=[];snap();
   renderRegs();renderMem();
   hilightLine(null);
   document.getElementById('tb-line').textContent='\u2014';
+  // Log symbol table
+  const syms=Object.entries(symTable);
+  if(syms.length){
+    lg(`Symbols: ${syms.map(([n,s])=>s.isEqu?`${n}=${s.value}`:
+      `${n}@${s.addr.toString(16).toUpperCase().padStart(4,'0')}h(${s.size===1?'DB':'DW'})`).join('  ')}`,'linfo');
+  }
   lg(`Assembled OK: ${instrs.length} instruction(s) loaded.  Press [Single Step] or [Run].`,'linfo');
   setSt(`Assembled: ${instrs.length} instructions. Ready.`,'ok');
+  // Update memory view to show data area if symbols present
+  if(syms.length && !syms[0][1].isEqu){
+    const firstDataAddr=syms.find(([,s])=>!s.isEqu)?.[1]?.addr;
+    if(firstDataAddr){
+      document.getElementById('mem-addr').value=firstDataAddr.toString(16).toUpperCase().padStart(4,'0');
+      renderMem();
+    }
+  }
 }
 
 // ============================================================
@@ -825,38 +1061,26 @@ document.addEventListener('keydown',e=>{
 // ============================================================
 //  DEFAULT PROGRAM
 // ============================================================
-ed.value=`; ================================================
-; emu8086 - Demo Program
-; ================================================
-; Keyboard shortcuts:
-;   F8 = Single Step     F5 = Run     F2 = Reload
-
-        MOV     AX, 0005h       ; AX = 5
-        MOV     BX, 0003h       ; BX = 3
-        ADD     AX, BX          ; AX = AX + BX  (= 8)
-        MOV     CX, AX          ; CX = AX
-
-        MOV     DX, 000Ah       ; DX = 10
-        SUB     DX, CX          ; DX = 10 - 8  (= 2)
-        CMP     AX, 0008h       ; compare AX with 8  -> sets ZF
-
-; --- Loop: write counter values to memory ---
-        MOV     CX, 0004h       ; loop counter = 4
-        MOV     SI, 0010h       ; destination pointer
-WLOOP:
-        MOV     [SI], CX        ; memory[SI] = CX
-        INC     SI
-        INC     SI              ; advance pointer (word = 2 bytes)
-        LOOP    WLOOP           ; CX--, if CX<>0 jump
-
-; --- Bit manipulation ---
-        MOV     AX, 0001h
-        SHL     AX, 0003h       ; AX = 0001h << 3 = 0008h
-        OR      AX, 0010h       ; AX = 0008h | 0010h = 0018h
-        AND     AX, 001Fh       ; AX = 0018h & 001Fh = 0018h
-        XOR     BX, BX          ; BX = 0 (clear)
-
-        HLT                     ; halt processor
+ed.value=`ORG 100h
+; --- Exercitiul 1: Conversie ASCII la Hexa ---
+MOV AL, 'B'       ; Exemplu: codul ASCII pentru 'B' (42h)
+CMP AL, 39h       ; Compara cu codul ASCII al lui '9'
+JBE este_cifra    ; Daca AL <= 39h, este cifra
+SUB AL, 07h       ; Pentru litere A-F, scadem inca 7 dupa pasul urmator
+este_cifra:
+SUB AL, 30h       ; Obtinem valoarea numerica
+; Rezultatul este in AL (0Bh pentru 'B')
+; --- Exercitiul 6-8: Extragere cifre ---
+MOV AX, numar     ; Incarcam numarul (123 zecimal)
+MOV BL, 10        ; Divizorul
+DIV BL            ; AL = 12, AH = 3 (cifra 3)
+MOV CL, AH        ; CL = 3
+XOR AH, AH
+DIV BL            ; AL = 1 (cifra 1), AH = 2 (cifra 2)
+MOV BL, AH        ; BL = 2
+; AL contine deja cifra 1
+RET               ; Final program
+numar DW 123      ; Declararea variabilei
 `;
 
 renderLineNums();
